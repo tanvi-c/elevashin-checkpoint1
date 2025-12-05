@@ -18,22 +18,6 @@ def onAppStart(app):
     app.stepsPerSecond = 10000
     app.age, app.HRR = 0, 0
 
-    #DELETE LATER
-    app.path = parseGPX('../test.gpx')
-    app.zoom = getZoom(app)
-    app.map = getMap(app)
-    imgW, imgH = getImageSize(app.map)
-    app.imgW, app.imgH = imgW * ((app.height)//imgH), app.height
-    app.plotPoints = app.path.getPlotPoints(app)
-    app.age, app.HRR = 17, 65
-    app.isHRAvail = app.path.isHRAvail()
-    app.isFileHover = False
-    app.isSpeedSelected = True
-    app.selectedDot = None
-    app.currDot = 0
-    app.isContourHover = False
-    app.isAnimated = True
-
 def start_redrawAll(app):
     drawRect(0, 0, app.width, app.height, fill = 'lemonChiffon')
     drawImage('https://github.com/tanvi-c/elevashin-checkpoint1/blob/main/title%20img.jpg?raw=true',
@@ -62,6 +46,7 @@ def start_onMousePress(app, mouseX, mouseY):
 
             reset(app, gpx)
             
+            # Prompting questions
             res1 = app.getTextInput('Please enter your age.')
             if res1 != None and res1.isdigit():
                 app.age = int(res1)
@@ -98,11 +83,15 @@ def sat_redrawAll(app):
             drawCircle(currX, currY, 8, fill = 'white')
         drawLine(x1, y1, x2, y2, fill = color)
 
-    drawRect(centX - 55, 270, 110, 200, fill = None, border = 'black')
+    # Key 
+    drawRect(centX - 55, 270, 110, 240, fill = None, border = 'black')
     drawLabel('Key', centX, 290, size = 24, font = 'monospace')
     for i in range(5):
         drawRect(centX - 40, 30 * i + 320, 20, 20, fill = colors[i])
         drawLabel(f'Zone {i + 1}', centX - 10, 30 * i + 330, align = 'left', size = 14, font = 'monospace')
+
+    drawStar(centX - 30, 485, 15, 5, fill = 'lightgray', border = 'black', borderWidth = 1)
+    drawLabel('Miles', centX - 10, 485, align = 'left', size = 14, font = 'monospace')
 
     if app.selectedDot != None:
         currX, currY = app.plotPoints[app.selectedDot]
@@ -111,6 +100,11 @@ def sat_redrawAll(app):
         drawRect(currX+10, currY-40, 95, 35, fill = 'lightgray')
         drawLabel(f'Pace: {pythonRound(curr.speed * 2.23694, 2)} mph', currX+15, currY-30, align = 'left')
         drawLabel(f'Elev: {pythonRound(curr.ele * 3.28084, 2)} ft', currX+15, currY-15, align = 'left')
+
+    for i in range(len(app.path.markers)):
+        currX, currY = app.plotPoints[app.path.markers[i]]
+        drawStar(currX, currY, 16, 5, fill = 'lightgray', border = 'black', borderWidth = 1)
+        drawLabel(f'{i + 1}', currX, currY, fill = 'black', size = 10)
     
     # Exercise Summary
     drawLabel(f'SUMMARY', centX, 35, size = 32, font = 'monospace', bold = True)
@@ -207,6 +201,7 @@ def reset(app, gpx):
     app.selectedDot = None
     app.currDot = 0
 
+# User can select their files
 # https://docs.python.org/3/library/dialog.html
 # https://tkdocs.com/tutorial/windows.html
 
@@ -222,28 +217,44 @@ def getGPX():
     root.destroy()
     return filename if filename else None  
 
-#used Python ElementTree XML API docs https://docs.python.org/3/library/xml.etree.elementtree.html
+# Used Python ElementTree XML API docs https://docs.python.org/3/library/xml.etree.elementtree.html
 def parseGPX(file):
     tree = ET.parse(file)
     root = tree.getroot()
 
     points = []
-    ns = {'gpx': root.tag.split('}')[0].strip('{')}
+    ns = {'gpx': root.tag.split('}')[0].strip('{'),
+          'gpxtpx': "http://www.garmin.com/xmlschemas/TrackPointExtension/v1"}
 
     for trackpoint in root.findall('.//gpx:trkpt', ns):
         lat = float(trackpoint.get('lat'))
         lon = float(trackpoint.get('lon'))
-        ele = float(trackpoint.find('gpx:ele', ns).text)
-        time = (trackpoint.find('gpx:time', ns).text)
+
+        ele = trackpoint.find('gpx:ele', ns)
+        ele = float(ele.text) if ele != None else 0.0
+
+        time = trackpoint.find('gpx:time', ns)
+        time = time.text if time != None else '2025-01-01T00:00:00Z'
 
         ext = trackpoint.find("gpx:extensions", ns)
-        speed = float(ext.find("gpx:speed", ns).text)
-        course = float(ext.find("gpx:course", ns).text)
-        hAcc = float(ext.find("gpx:hAcc", ns).text)
-        vAcc = float(ext.find("gpx:vAcc", ns).text)
-        # FUTURE: extract hr
 
-        newPt = Point(lat, lon, ele, time, speed, course, hAcc, vAcc, hr = None)
+        speed, course, hr = 0.0, 0.0, None
+        if ext != None:
+            speed1 = ext.find("gpx:speed", ns)
+            speed = float(speed1.text) if speed1 != None else 0.0
+
+            course1 = ext.find("gpx:course", ns)
+            course = float(course1.text) if course1 != None else 0.0
+
+            hr1 = ext.find("gpx:hr", ns)
+            hr = int(hr1.text) if hr1 != None else None
+            
+            tpe = ext.find("gpxtpx:TrackPointExtension", ns)
+            if tpe != None:
+                hr2 = tpe.find("gpxtpx:hr", ns)
+                hr = int(hr2.text) if hr2 != None else None
+
+        newPt = Point(lat, lon, ele, time, speed, course, hr)
         points.append(newPt)
     
     newPath = Path(points)
@@ -251,8 +262,8 @@ def parseGPX(file):
 
     return newPath
 
-# haversine is analogous to the distance function but for latitude and longitude (Source: medium.com)
-# assumes Earth is a perfect sphere - minor errors OK in this app (relatively small distances) 
+# Haversine is analogous to the distance function but for latitude and longitude (Source: medium.com)
+# Assumes Earth is a perfect sphere - minor errors OK in this app (relatively small distances) 
 def haversine(lat1, lon1, lat2, lon2):
     r = 6371000 #Earth's radius in meters
     phi1, phi2 = lat1 * (math.pi/180), lat2 * (math.pi/180)
@@ -272,6 +283,8 @@ def getMap(app):
               f'&zoom={app.zoom}&size={app.width}x{app.height}&format=jpg&maptype=satellite&key={API}')
     
     return mapUrl
+
+# Get path to overlay on maps precisely
 
 def getCenter(app):
     lats = [p.lat for p in app.path.points]
@@ -320,6 +333,8 @@ def getZoom(app):
     
     return 1
 
+# Contour Map
+
 # https://numpy.org/devdocs/user/numpy-for-matlab-users.html - Reccommends usage of NumPy & SciPy for MatLab
 def getGriddedData(app):
     lats = np.array([p.lat for p in app.path.points])
@@ -343,7 +358,7 @@ def buildContour(app):
     ax.tick_params(axis='x', colors='gray')
     ax.tick_params(axis='y', colors='gray')
     ax.tick_params(axis='z', colors='gray')
-    ax.set_title('Total Elevation Overview. You rocked it!')
+    ax.set_title("Total Elevation Overview. You're leveling up!")
     ax.set_xlabel('Longitude')
     ax.set_ylabel('Latitude')
     ax.set_zlabel('Elevation (m)')
@@ -366,17 +381,24 @@ class Path:
         self.points = points
         self.totalDist = 0
         self.netEle= 0
+        self.markers = []
 
     def getStats(self):
         if len(self.points) < 2:
             return
 
+        seen = set()
         for i in range(1, len(self.points)):
             p1 = self.points[i-1]
             p2 = self.points[i]
 
             d = p1.distanceTo(p2)
             self.totalDist += d
+            # m --> mi conversion for mile markers
+            miles = int(self.totalDist // 1609)
+            if miles not in seen and miles >= 1:
+                seen.add(miles)
+                self.markers.append(i)
             self.netEle += (p2.ele - p1.ele)
 
         start, end = self.points[0], self.points[-1]
@@ -387,7 +409,7 @@ class Path:
         scale = 2 ** app.zoom
         centerLat, centerLon = getCenter(app)
 
-        # compute center pixel (based on same centerLat/centerLon used in map url)
+        # Compute center pixel (based on same centerLat/centerLon used in map url) to get focused image
         centerX, centerY = getMercatorPts(centerLat, centerLon)
         pixelCentX, pixelCentY = centerX * scale, centerY * scale
 
@@ -442,35 +464,34 @@ class Path:
         sec = secDiff % 60
         return (f'{hr}:{min}:{sec}', secDiff)
     
-
+    
 class Point:
-    # sometimes HR not recorded
-    def __init__(self, lat, lon, ele, time, speed, course, hAcc, vAcc, hr = None):
+    def __init__(self, lat, lon, ele, time, speed, course, hr):
         self.lat = lat
         self.lon = lon
         self.ele = ele
+
         # datetime documentation: https://docs.python.org/3/library/datetime.html#datetime.datetime
         dateTime = datetime.strptime(time, '%Y-%m-%dT%H:%M:%SZ')
         dateTime = dateTime.replace(tzinfo=timezone.utc)
         dateTime = dateTime.astimezone()
         self.dateTime = dateTime
+
         self.speed = speed
         self.course = course
-        self.hAcc = hAcc
-        self.vAcc = vAcc
         self.HR = hr
 
-    # for debugging
+    # For Debugging
     def __repr__(self):
         return f'Point(lat: {self.lat}, lon: {self.lon}, ele: {self.ele}, hr: {self.hr}) at {self.dateTime}'
 
-    # 3D distance logic: taking the arc length of the curve is summing all the hypotenuses (dx, dy) of 
-    # infinitesimally small right triangles 
-    # haversine gives the horizontal distance and elevation gives vertical distance
+    # 3D distance logic: Taking the arc length of the curve is summing all the hypotenuses (dx, dy) of 
+    # infinitesimally small right triangles.
+    # Haversine gives the horizontal distance and elevation gives vertical distance
     def distanceTo(self, other):
         if isinstance(other, Point):
             horiz = haversine(self.lat, self.lon, other.lat, other.lon)
             vert = abs(other.ele - self.ele)
             return (horiz**2 + vert**2)**0.5
 
-runAppWithScreens(initialScreen = 'sat', width=1000, height=750)
+runAppWithScreens(initialScreen = 'start', width=1000, height=750)
