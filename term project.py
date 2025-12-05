@@ -93,6 +93,7 @@ def sat_redrawAll(app):
     drawStar(centX - 30, 485, 15, 5, fill = 'lightgray', border = 'black', borderWidth = 1)
     drawLabel('Miles', centX - 10, 485, align = 'left', size = 14, font = 'monospace')
 
+    # Show stats when mouse over point
     if app.selectedDot != None:
         currX, currY = app.plotPoints[app.selectedDot]
         curr = app.path.points[app.selectedDot]
@@ -101,6 +102,7 @@ def sat_redrawAll(app):
         drawLabel(f'Pace: {pythonRound(curr.speed * 2.23694, 2)} mph', currX+15, currY-30, align = 'left')
         drawLabel(f'Elev: {pythonRound(curr.ele * 3.28084, 2)} ft', currX+15, currY-15, align = 'left')
 
+    # Mile Markers
     for i in range(len(app.path.markers)):
         currX, currY = app.plotPoints[app.path.markers[i]]
         drawStar(currX, currY, 16, 5, fill = 'lightgray', border = 'black', borderWidth = 1)
@@ -108,11 +110,11 @@ def sat_redrawAll(app):
     
     # Exercise Summary
     drawLabel(f'SUMMARY', centX, 35, size = 32, font = 'monospace', bold = True)
-    drawLabel(f'Distance: {pythonRound(app.path.totalDist / 1609, 2)} miles', centX, 
+    drawLabel(f'Distance: {pythonRound(app.path.totalDist, 2)} miles', centX, 
               70, font = 'monospace', size = 18)
     drawLabel(f'Duration: {app.path.durationStr}', centX, 95, 
               font = 'monospace', size = 18)
-    drawLabel(f'Avg Speed: {pythonRound(app.path.avgSpeed * 3.28084, 2)} ft/s', centX, 
+    drawLabel(f'Avg Speed: {pythonRound(app.path.avgSpeed, 2)} mph', centX, 
               120, font = 'monospace', size = 18)
 
     # Speed / HR button
@@ -131,6 +133,12 @@ def sat_redrawAll(app):
     if not app.isHRAvail:
         drawLabel('HR Data Unavailable', centX, 235, size = 16, font = 'monospace',
                   italic = True)
+    
+    # Elevate Score
+    drawRect(centX, 550, 200, 30, fill=gradient('red', 'orange', 'yellow',
+            start='right'), align = 'center')
+    drawLabel(f'Elevate Score: {app.path.getScore()}', centX, 595, font = 'monospace', size = 16)
+    drawCircle(centX - 100 + app.path.getScore() * 2, 550, 12, fill = 'white')
 
     # File Folder  
     drawImage('https://github.com/tanvi-c/elevashin/blob/main/file%20folder.jpg?raw=true', 
@@ -248,11 +256,14 @@ def parseGPX(file):
 
             hr1 = ext.find("gpx:hr", ns)
             hr = int(hr1.text) if hr1 != None else None
+
+            hr2 = ext.find("gpx:heartrate", ns)
+            hr = int(hr2.text) if hr2 != None else None
             
             tpe = ext.find("gpxtpx:TrackPointExtension", ns)
             if tpe != None:
-                hr2 = tpe.find("gpxtpx:hr", ns)
-                hr = int(hr2.text) if hr2 != None else None
+                hr3 = tpe.find("gpxtpx:hr", ns)
+                hr = int(hr3.text) if hr3 != None else None
 
         newPt = Point(lat, lon, ele, time, speed, course, hr)
         points.append(newPt)
@@ -350,7 +361,7 @@ def getGriddedData(app):
 # https://matplotlib.org/stable/gallery/mplot3d/surface3d.html
 def buildContour(app):
     X, Y, Z = getGriddedData(app)
-    fig = plt.figure(figsize=(9, 6))
+    fig = plt.figure(figsize=(10, 8))
     ax = fig.add_subplot(111, projection='3d')
     surf = ax.plot_surface(X, Y, Z, cmap= cm.coolwarm, linewidth=0, antialiased=False)
     fig.colorbar(surf, shrink=0.5, aspect=5)
@@ -380,12 +391,13 @@ class Path:
     def __init__(self, points):
         self.points = points
         self.totalDist = 0
+        self.totalGain = 0
         self.netEle= 0
         self.markers = []
 
     def getStats(self):
         if len(self.points) < 2:
-            return
+            return None
 
         seen = set()
         for i in range(1, len(self.points)):
@@ -400,10 +412,13 @@ class Path:
                 seen.add(miles)
                 self.markers.append(i)
             self.netEle += (p2.ele - p1.ele)
+            if p2.ele - p1.ele > 0:
+                self.totalGain += p2.ele - p1.ele
+        self.totalDist /= 1609
 
         start, end = self.points[0], self.points[-1]
         self.durationStr, self.durationSec = Path.getDuration(start, end)
-        self.avgSpeed = self.totalDist / self.durationSec if self.durationSec > 0 else 0
+        self.avgSpeed = (self.totalDist / self.durationSec) * 3600 if self.durationSec > 0 else 0
 
     def getPlotPoints(self, app):
         scale = 2 ** app.zoom
@@ -425,11 +440,11 @@ class Path:
     
     def getColorIndex(self, app, point):
         if app.isSpeedSelected == True:
-            if point.speed < 1.5:
+            if point.speed < 1:
                 return 0
             elif point.speed < 3:
                 return 1
-            elif point.speed < 5.5:
+            elif point.speed < 5:
                 return 2
             elif point.speed < 7:
                 return 3
@@ -454,6 +469,17 @@ class Path:
             if p.HR != None:
                 return True
         return False
+    
+    def getScore(self):
+        if len(self.points) < 2:
+            return 0
+        distScore = min(self.totalDist * 3.5, 25)
+        eleGainScore = min(self.totalGain / 300 * 3, 35)
+        avgGrade = (self.totalGain / self.totalDist * 100)
+        gradeScore = min(avgGrade * 5, 25)
+        durationScore = min(self.durationSec / 360, 15)
+
+        return rounded(distScore + eleGainScore + gradeScore + durationScore)
 
     @staticmethod
     def getDuration(start, end):
